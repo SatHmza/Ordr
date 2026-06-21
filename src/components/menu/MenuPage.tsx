@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useCallback } from 'react'
-import { ShoppingCart, X, Plus, Minus, Globe, ChevronDown } from 'lucide-react'
+import { useState, useCallback, useEffect } from 'react'
+import { X, Plus, Minus, Globe, ChevronDown } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { CategoryWithItems, Item, Restaurant, Table } from '@/lib/supabase/types'
 import { formatPrice, getLangName, getLangDesc } from '@/lib/utils'
@@ -9,27 +9,61 @@ import { createClient } from '@/lib/supabase/client'
 import Image from 'next/image'
 
 type Lang = 'fr' | 'ar' | 'en'
+type OrderStatus = 'pending' | 'confirmed' | 'preparing' | 'ready' | 'served'
 
 const LABELS: Record<Lang, Record<string, string>> = {
   fr: {
     cart: 'Panier', empty: 'Votre panier est vide', note: 'Note pour la cuisine (optionnel)',
-    order: 'Commander', ordered: 'Commande envoyée !', total: 'Total',
-    close: 'Fermer', unavailable: 'Non disponible', viewCart: 'Voir le panier',
-    ordering: 'Commande en cours...', confirmMsg: 'Votre commande a été envoyée. Le serveur arrive !',
+    order: 'Commander', total: 'Total', close: 'Fermer', viewCart: 'Voir le panier',
+    ordering: 'Commande en cours...', orderMore: 'Commander autre chose',
+    trackingTitle: 'Commande en cours',
+    trackingNote: 'Restez assis, nous préparons votre commande.',
   },
   ar: {
     cart: 'السلة', empty: 'سلتك فارغة', note: 'ملاحظة للمطبخ (اختياري)',
-    order: 'تأكيد الطلب', ordered: 'تم إرسال طلبك!', total: 'المجموع',
-    close: 'إغلاق', unavailable: 'غير متوفر', viewCart: 'عرض السلة',
-    ordering: 'جاري الطلب...', confirmMsg: 'تم استلام طلبك. النادل في الطريق!',
+    order: 'تأكيد الطلب', total: 'المجموع', close: 'إغلاق', viewCart: 'عرض السلة',
+    ordering: 'جاري الطلب...', orderMore: 'طلب شيء آخر',
+    trackingTitle: 'طلبك قيد التنفيذ',
+    trackingNote: 'ابق في مكانك، نحن نحضر طلبك.',
   },
   en: {
     cart: 'Cart', empty: 'Your cart is empty', note: 'Note for the kitchen (optional)',
-    order: 'Place Order', ordered: 'Order Sent!', total: 'Total',
-    close: 'Close', unavailable: 'Unavailable', viewCart: 'View Cart',
-    ordering: 'Placing order...', confirmMsg: 'Your order was received. The waiter is on the way!',
+    order: 'Place Order', total: 'Total', close: 'Close', viewCart: 'View Cart',
+    ordering: 'Placing order...', orderMore: 'Order more',
+    trackingTitle: 'Order in progress',
+    trackingNote: 'Stay seated, we are preparing your order.',
   },
 }
+
+const STATUS_INFO: Record<OrderStatus, Record<Lang, { label: string; icon: string; desc: string }>> = {
+  pending: {
+    fr: { label: 'En attente', icon: '🕐', desc: 'Votre commande est reçue et attend confirmation.' },
+    ar: { label: 'في الانتظار', icon: '🕐', desc: 'تم استلام طلبك وينتظر التأكيد.' },
+    en: { label: 'Waiting', icon: '🕐', desc: 'Your order has been received and is waiting for confirmation.' },
+  },
+  confirmed: {
+    fr: { label: 'Confirmée', icon: '✅', desc: 'Votre commande a été confirmée par le restaurant.' },
+    ar: { label: 'مؤكد', icon: '✅', desc: 'تم تأكيد طلبك من قبل المطعم.' },
+    en: { label: 'Confirmed', icon: '✅', desc: 'Your order has been confirmed by the restaurant.' },
+  },
+  preparing: {
+    fr: { label: 'En préparation', icon: '👨‍🍳', desc: 'La cuisine prépare votre commande.' },
+    ar: { label: 'قيد التحضير', icon: '👨‍🍳', desc: 'المطبخ يحضر طلبك الآن.' },
+    en: { label: 'Preparing', icon: '👨‍🍳', desc: 'The kitchen is preparing your order.' },
+  },
+  ready: {
+    fr: { label: 'Prêt !', icon: '🍽️', desc: 'Votre commande est prête ! Le serveur arrive.' },
+    ar: { label: 'جاهز!', icon: '🍽️', desc: 'طلبك جاهز! النادل في الطريق إليك.' },
+    en: { label: 'Ready!', icon: '🍽️', desc: 'Your order is ready! The waiter is on the way.' },
+  },
+  served: {
+    fr: { label: 'Servi', icon: '😊', desc: 'Bon appétit !' },
+    ar: { label: 'تم التقديم', icon: '😊', desc: 'بالهناء والشفاء!' },
+    en: { label: 'Served', icon: '😊', desc: 'Enjoy your meal!' },
+  },
+}
+
+const STATUS_ORDER: OrderStatus[] = ['pending', 'confirmed', 'preparing', 'ready', 'served']
 
 interface CartItem {
   item: Item
@@ -49,13 +83,37 @@ export default function MenuPage({ restaurant, table, categories }: Props) {
   const [cart, setCart] = useState<CartItem[]>([])
   const [cartOpen, setCartOpen] = useState(false)
   const [orderNote, setOrderNote] = useState('')
-  const [ordered, setOrdered] = useState(false)
+  const [orderId, setOrderId] = useState<string | null>(null)
+  const [orderStatus, setOrderStatus] = useState<OrderStatus>('pending')
   const [placing, setPlacing] = useState(false)
   const [activeCategory, setActiveCategory] = useState<string>(categories[0]?.id ?? '')
   const [langOpen, setLangOpen] = useState(false)
 
   const t = LABELS[lang]
   const isRTL = lang === 'ar'
+  const supabase = createClient()
+
+  // Subscribe to order status changes after order is placed
+  useEffect(() => {
+    if (!orderId) return
+
+    const channel = supabase
+      .channel(`order-${orderId}`)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'orders',
+        filter: `id=eq.${orderId}`,
+      }, (payload) => {
+        const newStatus = payload.new.status as OrderStatus
+        setOrderStatus(newStatus)
+        const info = STATUS_INFO[newStatus]?.[lang]
+        if (info) toast(info.icon + ' ' + info.label, { duration: 4000 })
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [orderId, lang])
 
   const addToCart = useCallback((item: Item) => {
     setCart(prev => {
@@ -80,7 +138,6 @@ export default function MenuPage({ restaurant, table, categories }: Props) {
   const placeOrder = async () => {
     if (cart.length === 0 || placing) return
     setPlacing(true)
-    const supabase = createClient()
 
     const { data: order, error } = await supabase
       .from('orders')
@@ -110,25 +167,93 @@ export default function MenuPage({ restaurant, table, categories }: Props) {
       }))
     )
 
-    setOrdered(true)
+    setOrderId(order.id)
+    setOrderStatus('pending')
     setCart([])
     setCartOpen(false)
+    setOrderNote('')
     setPlacing(false)
   }
 
-  if (ordered) {
+  // Order tracking screen
+  if (orderId) {
+    const currentInfo = STATUS_INFO[orderStatus]?.[lang]
+    const currentStep = STATUS_ORDER.indexOf(orderStatus)
+
     return (
-      <div className={`min-h-screen flex flex-col items-center justify-center bg-white px-6 text-center ${isRTL ? 'rtl' : ''}`}>
-        <div className="text-6xl mb-6">✅</div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-3">{t.ordered}</h1>
-        <p className="text-gray-500 text-lg mb-8">{t.confirmMsg}</p>
-        <p className="text-gray-400 text-sm">{table.label}</p>
-        <button
-          onClick={() => setOrdered(false)}
-          className="mt-8 px-6 py-3 bg-orange-500 text-white rounded-full font-semibold"
-        >
-          {lang === 'fr' ? 'Commander autre chose' : lang === 'ar' ? 'طلب شيء آخر' : 'Order more'}
-        </button>
+      <div className={`min-h-screen bg-white flex flex-col ${isRTL ? 'rtl' : 'ltr'}`} dir={isRTL ? 'rtl' : 'ltr'}>
+        {/* Header */}
+        <div className="bg-orange-500 text-white px-5 pt-10 pb-8 text-center">
+          <p className="text-orange-200 text-sm mb-1">{restaurant.name} · {table.label}</p>
+          <h1 className="text-2xl font-bold">{t.trackingTitle}</h1>
+          <p className="text-orange-100 text-sm mt-1">{t.trackingNote}</p>
+        </div>
+
+        {/* Status card */}
+        <div className="flex-1 px-5 py-8 flex flex-col items-center">
+          <div className="w-full max-w-sm">
+            {/* Big status icon */}
+            <div className="text-7xl text-center mb-4 animate-bounce">
+              {currentInfo?.icon}
+            </div>
+            <h2 className="text-2xl font-bold text-center text-gray-900 mb-2">
+              {currentInfo?.label}
+            </h2>
+            <p className="text-center text-gray-500 mb-8">
+              {currentInfo?.desc}
+            </p>
+
+            {/* Progress steps */}
+            <div className="flex items-center justify-between mb-8">
+              {STATUS_ORDER.filter(s => s !== 'served').map((s, i) => {
+                const done = STATUS_ORDER.indexOf(s) <= currentStep
+                const active = s === orderStatus
+                return (
+                  <div key={s} className="flex items-center flex-1">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 transition-all ${
+                      done ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-400'
+                    } ${active ? 'ring-4 ring-orange-200 scale-110' : ''}`}>
+                      {done ? '✓' : i + 1}
+                    </div>
+                    {i < 3 && (
+                      <div className={`flex-1 h-1 mx-1 rounded transition-all ${
+                        STATUS_ORDER.indexOf(STATUS_ORDER[i + 1]) <= currentStep ? 'bg-orange-500' : 'bg-gray-100'
+                      }`} />
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Status labels */}
+            <div className="flex justify-between text-xs text-gray-400 mb-8 px-1">
+              {(['pending', 'confirmed', 'preparing', 'ready'] as OrderStatus[]).map(s => (
+                <span key={s} className={`text-center flex-1 ${s === orderStatus ? 'text-orange-500 font-semibold' : ''}`}>
+                  {STATUS_INFO[s][lang].label}
+                </span>
+              ))}
+            </div>
+
+            {/* Order more button */}
+            {orderStatus !== 'served' && (
+              <button
+                onClick={() => setOrderId(null)}
+                className="w-full py-3 rounded-2xl border-2 border-orange-500 text-orange-500 font-semibold"
+              >
+                + {t.orderMore}
+              </button>
+            )}
+
+            {orderStatus === 'served' && (
+              <button
+                onClick={() => { setOrderId(null); setOrderStatus('pending') }}
+                className="w-full py-3 rounded-2xl bg-orange-500 text-white font-semibold"
+              >
+                + {t.orderMore}
+              </button>
+            )}
+          </div>
+        </div>
       </div>
     )
   }
@@ -266,7 +391,7 @@ export default function MenuPage({ restaurant, table, categories }: Props) {
           <div className="absolute inset-0 bg-black/40" onClick={() => setCartOpen(false)} />
           <div className="relative bg-white rounded-t-3xl max-h-[85vh] flex flex-col" dir={isRTL ? 'rtl' : 'ltr'}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-              <h2 className="font-bold text-lg">{t.cart}</h2>
+              <h2 className="font-bold text-lg text-gray-900">{t.cart}</h2>
               <button onClick={() => setCartOpen(false)} className="p-1 text-gray-400">
                 <X size={20} />
               </button>
@@ -284,7 +409,7 @@ export default function MenuPage({ restaurant, table, categories }: Props) {
                       className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center">
                       <Minus size={12} />
                     </button>
-                    <span className="w-5 text-center font-bold text-sm">{c.quantity}</span>
+                    <span className="w-5 text-center font-bold text-sm text-gray-900">{c.quantity}</span>
                     <button onClick={() => updateQty(c.item.id, 1)}
                       className="w-7 h-7 rounded-full bg-orange-500 text-white flex items-center justify-center">
                       <Plus size={12} />
@@ -298,7 +423,7 @@ export default function MenuPage({ restaurant, table, categories }: Props) {
                 onChange={e => setOrderNote(e.target.value)}
                 placeholder={t.note}
                 rows={2}
-                className="w-full text-sm border border-gray-200 rounded-xl px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-orange-300"
+                className="w-full text-sm text-gray-900 placeholder-gray-400 border border-gray-200 rounded-xl px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-orange-300"
               />
             </div>
 

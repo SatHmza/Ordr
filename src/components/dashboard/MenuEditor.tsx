@@ -235,7 +235,7 @@ export default function MenuEditor({ restaurant, initialCategories }: Props) {
                 type="number" step="0.5" min="0"
                 value={editingItem.price as any ?? ''}
                 onChange={e => setEditingItem(p => p ? { ...p, price: e.target.value as any } : p)}
-                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-300"
               />
             </div>
             <Field label="URL de l'image (optionnel)" value={editingItem.image_url ?? ''} onChange={v => setEditingItem(p => p ? { ...p, image_url: v } : p)} placeholder="https://..." />
@@ -265,7 +265,7 @@ function Field({ label, value, onChange, multiline, dir, placeholder }: {
   label: string; value: string; onChange: (v: string) => void
   multiline?: boolean; dir?: string; placeholder?: string
 }) {
-  const cls = "w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+  const cls = "w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-300"
   return (
     <div>
       <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
