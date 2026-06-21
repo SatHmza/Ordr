@@ -19,6 +19,7 @@ export default function TableManager({ restaurant, initialTables }: Props) {
   const [previewTable, setPreviewTable] = useState<Table | null>(null)
   const [qrDataUrl, setQrDataUrl] = useState('')
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const addingRef = useRef(false)
   const supabase = createClient()
 
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : ''
@@ -43,7 +44,8 @@ export default function TableManager({ restaurant, initialTables }: Props) {
   }
 
   const addTable = async () => {
-    if (!newLabel.trim()) return
+    if (!newLabel.trim() || addingRef.current) return
+    addingRef.current = true
     setAdding(true)
     const qr_token = generateToken()
     const { data, error } = await supabase
@@ -59,6 +61,7 @@ export default function TableManager({ restaurant, initialTables }: Props) {
       setNewLabel('')
       toast.success(`Table "${data.label}" créée`)
     }
+    addingRef.current = false
     setAdding(false)
   }
 
