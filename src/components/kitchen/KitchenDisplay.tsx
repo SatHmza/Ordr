@@ -236,7 +236,7 @@ export default function KitchenDisplay({ restaurantId }: Props) {
                   {order.order_items.map(oi => (
                     <div key={oi.id} className="flex justify-between text-sm">
                       <span className="font-medium text-gray-800">
-                        {oi.quantity}× {(oi as any).items?.name_fr ?? (oi as any).items?.name_ar ?? '—'}
+                        {oi.quantity}× {(oi as any).items?.name_fr || (oi as any).items?.name_en || (oi as any).items?.name_ar || '—'}
                       </span>
                       {oi.note && (
                         <span className="text-gray-500 text-xs italic truncate ml-2">{oi.note}</span>
