@@ -67,7 +67,11 @@ export default function TableManager({ restaurant, initialTables }: Props) {
 
   const deleteTable = async (table: Table) => {
     if (!confirm(`Supprimer "${table.label}" ? Le QR code ne fonctionnera plus.`)) return
-    await supabase.from('tables').delete().eq('id', table.id)
+    const { error } = await supabase.from('tables').delete().eq('id', table.id)
+    if (error) {
+      toast.error('Impossible de supprimer cette table (des commandes y sont liées)')
+      return
+    }
     setTables(prev => prev.filter(t => t.id !== table.id))
     toast.success('Table supprimée')
   }
