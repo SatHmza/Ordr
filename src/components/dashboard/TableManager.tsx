@@ -67,9 +67,21 @@ export default function TableManager({ restaurant, initialTables }: Props) {
 
   const deleteTable = async (table: Table) => {
     if (!confirm(`Supprimer "${table.label}" ? Le QR code ne fonctionnera plus.`)) return
+
+    const { data: orders } = await supabase
+      .from('orders')
+      .select('id')
+      .eq('table_id', table.id)
+
+    if (orders && orders.length > 0) {
+      const orderIds = orders.map(o => o.id)
+      await supabase.from('order_items').delete().in('order_id', orderIds)
+      await supabase.from('orders').delete().in('id', orderIds)
+    }
+
     const { error } = await supabase.from('tables').delete().eq('id', table.id)
     if (error) {
-      toast.error('Impossible de supprimer cette table (des commandes y sont liées)')
+      toast.error('Erreur lors de la suppression')
       return
     }
     setTables(prev => prev.filter(t => t.id !== table.id))
