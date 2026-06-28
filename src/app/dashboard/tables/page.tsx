@@ -3,6 +3,8 @@ import { redirect } from 'next/navigation'
 import TableManager from '@/components/dashboard/TableManager'
 import type { Restaurant, Table } from '@/lib/supabase/types'
 
+export const dynamic = 'force-dynamic'
+
 export default async function TablesPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
